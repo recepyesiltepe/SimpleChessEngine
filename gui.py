@@ -38,6 +38,8 @@ class ChessApp:
         self.human_is_white = True
 
         self.state = GameState.initial()
+        self.state_history: list[GameState] = [self.state]
+        self.move_history: list[Move] = []
         self.selected_square: tuple[int, int] | None = None
         self.legal_moves: list[Move] = get_legal_moves(self.state)
 
@@ -62,9 +64,25 @@ class ChessApp:
         difficulty_menu.config(width=8)
         difficulty_menu.pack(side=tk.LEFT)
 
-        self.canvas = tk.Canvas(root, width=self.board_size, height=self.board_size, highlightthickness=0)
-        self.canvas.pack()
+        tk.Button(controls_frame, text="Undo", width=8, command=self._undo_last_turn).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Button(controls_frame, text="Restart", width=8, command=self._restart_game).pack(side=tk.LEFT)
+
+        content_frame = tk.Frame(root)
+        content_frame.pack(padx=8, pady=4)
+
+        self.canvas = tk.Canvas(content_frame, width=self.board_size, height=self.board_size, highlightthickness=0)
+        self.canvas.pack(side=tk.LEFT)
         self.canvas.bind("<Button-1>", self.on_click)
+
+        history_frame = tk.Frame(content_frame)
+        history_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0))
+
+        tk.Label(history_frame, text="Move History", font=("Arial", 11, "bold")).pack(anchor="w")
+        scrollbar = tk.Scrollbar(history_frame, orient=tk.VERTICAL)
+        self.history_listbox = tk.Listbox(history_frame, width=24, height=24, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.history_listbox.yview)
+        self.history_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
         self.status_var = tk.StringVar()
         self.status_label = tk.Label(root, textvariable=self.status_var, font=("Arial", 12))
@@ -75,6 +93,32 @@ class ChessApp:
     def _on_difficulty_change(self, selected_difficulty: str) -> None:
         self.ai_depth = DIFFICULTY_TO_DEPTH[selected_difficulty]
         self._update_status_label()
+
+    def _undo_last_turn(self) -> None:
+        if len(self.state_history) <= 1:
+            return
+
+        # When it's the human turn, revert both sides' last moves.
+        # When it's the AI turn, revert only the human move.
+        steps = 2 if self.state.white_to_move == self.human_is_white else 1
+        for _ in range(steps):
+            if len(self.state_history) <= 1:
+                break
+            self.state_history.pop()
+
+        self.state = self.state_history[-1]
+        self.move_history = self.move_history[: len(self.state_history) - 1]
+        self.selected_square = None
+        self.legal_moves = get_legal_moves(self.state)
+        self._refresh_ui()
+
+    def _restart_game(self) -> None:
+        self.state = GameState.initial()
+        self.state_history = [self.state]
+        self.move_history = []
+        self.selected_square = None
+        self.legal_moves = get_legal_moves(self.state)
+        self._refresh_ui()
 
     def on_click(self, event: tk.Event) -> None:
         if self._is_game_finished():
@@ -99,6 +143,8 @@ class ChessApp:
 
         if move is not None:
             self.state = self.state.apply_move(move)
+            self.state_history.append(self.state)
+            self.move_history.append(move)
             self.selected_square = None
             self.legal_moves = get_legal_moves(self.state)
             self._refresh_ui()
@@ -125,6 +171,8 @@ class ChessApp:
             return
 
         self.state = self.state.apply_move(ai_move)
+        self.state_history.append(self.state)
+        self.move_history.append(ai_move)
         self.legal_moves = get_legal_moves(self.state)
         self._refresh_ui()
         self._is_game_finished()
@@ -149,7 +197,19 @@ class ChessApp:
     def _refresh_ui(self) -> None:
         self._draw_board()
         self._draw_pieces()
+        self._update_move_history()
         self._update_status_label()
+
+    def _update_move_history(self) -> None:
+        self.history_listbox.delete(0, tk.END)
+        for index in range(0, len(self.move_history), 2):
+            turn_number = (index // 2) + 1
+            white_move = self.move_history[index].to_algebraic()
+            black_move = ""
+            if index + 1 < len(self.move_history):
+                black_move = self.move_history[index + 1].to_algebraic()
+            self.history_listbox.insert(tk.END, f"{turn_number}. {white_move} {black_move}".strip())
+        self.history_listbox.yview_moveto(1.0)
 
     def _draw_board(self) -> None:
         self.canvas.delete("all")
