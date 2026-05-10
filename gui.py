@@ -21,6 +21,13 @@ PIECE_TO_UNICODE = {
     "p": "♟",
 }
 
+DIFFICULTY_TO_DEPTH = {
+    "Easy": 1,
+    "Medium": 2,
+    "Hard": 3,
+    "Expert": 4,
+}
+
 
 class ChessApp:
     def __init__(self, root: tk.Tk, ai_depth: int = 3) -> None:
@@ -34,6 +41,27 @@ class ChessApp:
         self.selected_square: tuple[int, int] | None = None
         self.legal_moves: list[Move] = get_legal_moves(self.state)
 
+        controls_frame = tk.Frame(root)
+        controls_frame.pack(pady=(8, 4))
+
+        tk.Label(controls_frame, text="Difficulty:").pack(side=tk.LEFT, padx=(0, 6))
+
+        default_difficulty = "Hard"
+        for name, depth in DIFFICULTY_TO_DEPTH.items():
+            if depth == ai_depth:
+                default_difficulty = name
+                break
+
+        self.difficulty_var = tk.StringVar(value=default_difficulty)
+        difficulty_menu = tk.OptionMenu(
+            controls_frame,
+            self.difficulty_var,
+            *DIFFICULTY_TO_DEPTH.keys(),
+            command=self._on_difficulty_change,
+        )
+        difficulty_menu.config(width=8)
+        difficulty_menu.pack(side=tk.LEFT)
+
         self.canvas = tk.Canvas(root, width=self.board_size, height=self.board_size, highlightthickness=0)
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self.on_click)
@@ -43,6 +71,10 @@ class ChessApp:
         self.status_label.pack(pady=8)
 
         self._refresh_ui()
+
+    def _on_difficulty_change(self, selected_difficulty: str) -> None:
+        self.ai_depth = DIFFICULTY_TO_DEPTH[selected_difficulty]
+        self._update_status_label()
 
     def on_click(self, event: tk.Event) -> None:
         if self._is_game_finished():
@@ -169,12 +201,13 @@ class ChessApp:
     def _update_status_label(self) -> None:
         side_to_move = "White" if self.state.white_to_move else "Black"
         status = get_game_status(self.state)
+        difficulty = self.difficulty_var.get()
 
         if status == "ongoing":
             if is_in_check(self.state, self.state.white_to_move):
-                self.status_var.set(f"{side_to_move} to move - Check!")
+                self.status_var.set(f"{side_to_move} to move - Check! (AI: {difficulty})")
             else:
-                self.status_var.set(f"{side_to_move} to move")
+                self.status_var.set(f"{side_to_move} to move (AI: {difficulty})")
             return
 
         if status == "checkmate":
