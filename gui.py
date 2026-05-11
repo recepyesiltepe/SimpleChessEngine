@@ -6,7 +6,16 @@ from tkinter import messagebox
 
 import tkinter as tk
 
-from engine import GameState, Move, choose_best_move, get_game_status, get_legal_moves, is_in_check
+from engine import (
+    GameState,
+    Move,
+    choose_best_move,
+    evaluate_position,
+    get_game_status,
+    get_legal_moves,
+    has_insufficient_material,
+    is_in_check,
+)
 from engine.ai import PIECE_VALUES
 
 
@@ -61,8 +70,11 @@ class ChessApp:
         self.move_history: list[Move] = []
         self.selected_square: tuple[int, int] | None = None
         self.legal_moves: list[Move] = get_legal_moves(self.state)
+        self.hint_move: Move | None = None
         self._ai_busy = False
         self._game_generation = 0
+        self._end_announced = False
+        self.eval_bar_width = 28
 
         controls_frame = tk.Frame(root)
         controls_frame.pack(pady=(8, 4))
@@ -85,8 +97,22 @@ class ChessApp:
         self.difficulty_menu.config(width=8)
         self.difficulty_menu.pack(side=tk.LEFT)
 
+        tk.Label(controls_frame, text="Play as:").pack(side=tk.LEFT, padx=(12, 6))
+        self.side_var = tk.StringVar(value="White")
+        self.side_menu = tk.OptionMenu(
+            controls_frame,
+            self.side_var,
+            "White",
+            "Black",
+            command=self._on_side_change,
+        )
+        self.side_menu.config(width=6)
+        self.side_menu.pack(side=tk.LEFT)
+
+        self.hint_button = tk.Button(controls_frame, text="Hint", width=8, command=self._show_hint)
+        self.hint_button.pack(side=tk.LEFT, padx=(12, 4))
         self.undo_button = tk.Button(controls_frame, text="Undo", width=8, command=self._undo_last_turn)
-        self.undo_button.pack(side=tk.LEFT, padx=(12, 4))
+        self.undo_button.pack(side=tk.LEFT, padx=(4, 4))
         self.restart_button = tk.Button(controls_frame, text="Restart", width=8, command=self._restart_game)
         self.restart_button.pack(side=tk.LEFT)
 
@@ -106,6 +132,15 @@ class ChessApp:
         tk.Label(captured_frame, text="Off board (Black)", font=("Arial", 9)).pack(anchor="w")
         self.captured_black_var = tk.StringVar()
         tk.Label(captured_frame, textvariable=self.captured_black_var, font=("Arial", 18), wraplength=120, justify=tk.LEFT).pack(anchor="w")
+
+        self.eval_bar_canvas = tk.Canvas(
+            content_frame,
+            width=self.eval_bar_width,
+            height=self.board_size,
+            highlightthickness=1,
+            highlightbackground="#888888",
+        )
+        self.eval_bar_canvas.pack(side=tk.LEFT, padx=(0, 6))
 
         self.canvas = tk.Canvas(content_frame, width=self.canvas_width, height=self.canvas_height, highlightthickness=0)
         self.canvas.pack(side=tk.LEFT)
@@ -130,12 +165,72 @@ class ChessApp:
     def _set_controls_enabled(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
         self.difficulty_menu.config(state=state)
+        self.side_menu.config(state=state)
         self.undo_button.config(state=state)
         self.restart_button.config(state=state)
+        self._refresh_hint_button_state()
+
+    def _refresh_hint_button_state(self) -> None:
+        can_hint = (
+            not self._ai_busy
+            and self._terminal_label() is None
+            and self.state.white_to_move == self.human_is_white
+        )
+        self.hint_button.config(state=tk.NORMAL if can_hint else tk.DISABLED)
+
+    def _position_key(self, state: GameState) -> tuple:
+        board_tuple = tuple("".join(row) for row in state.board)
+        cr = state.castling_rights
+        return (
+            board_tuple,
+            state.white_to_move,
+            cr.wk,
+            cr.wq,
+            cr.bk,
+            cr.bq,
+            state.en_passant_target,
+        )
+
+    def _is_threefold_repetition(self) -> bool:
+        counts: Counter[tuple] = Counter()
+        for past_state in self.state_history:
+            key = self._position_key(past_state)
+            counts[key] += 1
+            if counts[key] >= 3:
+                return True
+        return False
+
+    def _draw_rule_reason(self) -> str | None:
+        if self.state.halfmove_clock >= 100:
+            return "50-move rule"
+        if has_insufficient_material(self.state):
+            return "insufficient material"
+        if self._is_threefold_repetition():
+            return "threefold repetition"
+        return None
+
+    def _terminal_label(self) -> str | None:
+        status = get_game_status(self.state)
+        if status == "checkmate":
+            winner = "Black" if self.state.white_to_move else "White"
+            return f"Checkmate - {winner} wins"
+        if status == "stalemate":
+            return "Stalemate - Draw"
+        reason = self._draw_rule_reason()
+        if reason is not None:
+            return f"Draw - {reason}"
+        return None
 
     def _on_difficulty_change(self, selected_difficulty: str) -> None:
         self.ai_depth = DIFFICULTY_TO_DEPTH[selected_difficulty]
         self._update_status_label()
+
+    def _on_side_change(self, selected_side: str) -> None:
+        new_side_is_white = selected_side == "White"
+        if new_side_is_white == self.human_is_white and len(self.move_history) == 0:
+            return
+        self.human_is_white = new_side_is_white
+        self._restart_game()
 
     def _undo_last_turn(self) -> None:
         if self._ai_busy:
@@ -144,6 +239,7 @@ class ChessApp:
             return
 
         self._game_generation += 1
+        self._end_announced = False
 
         steps = 2 if self.state.white_to_move == self.human_is_white else 1
         for _ in range(steps):
@@ -154,19 +250,41 @@ class ChessApp:
         self.state = self.state_history[-1]
         self.move_history = self.move_history[: len(self.state_history) - 1]
         self.selected_square = None
+        self.hint_move = None
         self.legal_moves = get_legal_moves(self.state)
         self._refresh_ui()
 
     def _restart_game(self) -> None:
         self._game_generation += 1
         self._ai_busy = False
+        self._end_announced = False
         self._set_controls_enabled(True)
         self.state = GameState.initial()
         self.state_history = [self.state]
         self.move_history = []
         self.selected_square = None
+        self.hint_move = None
         self.legal_moves = get_legal_moves(self.state)
         self._refresh_ui()
+        if self.state.white_to_move != self.human_is_white:
+            self.root.after(100, self._play_ai_turn)
+
+    def _display_to_board(self, display_row: int, display_col: int) -> tuple[int, int]:
+        if self.human_is_white:
+            return display_row, display_col
+        return 7 - display_row, 7 - display_col
+
+    def _board_to_display(self, row: int, col: int) -> tuple[int, int]:
+        if self.human_is_white:
+            return row, col
+        return 7 - row, 7 - col
+
+    def _square_screen_xy(self, row: int, col: int) -> tuple[int, int]:
+        display_row, display_col = self._board_to_display(row, col)
+        return (
+            self.margin_left + display_col * self.square_size,
+            display_row * self.square_size,
+        )
 
     def on_click(self, event: tk.Event) -> None:
         if self._ai_busy:
@@ -177,10 +295,11 @@ class ChessApp:
             return
 
         x_board = event.x - self.margin_left
-        row = event.y // self.square_size
-        col = x_board // self.square_size
-        if x_board < 0 or event.y < 0 or not (0 <= row < 8 and 0 <= col < 8):
+        display_row = event.y // self.square_size
+        display_col = x_board // self.square_size
+        if x_board < 0 or event.y < 0 or not (0 <= display_row < 8 and 0 <= display_col < 8):
             return
+        row, col = self._display_to_board(display_row, display_col)
 
         clicked_piece = self.state.board[row][col]
         if self.selected_square is None:
@@ -197,6 +316,7 @@ class ChessApp:
             self.state_history.append(self.state)
             self.move_history.append(move)
             self.selected_square = None
+            self.hint_move = None
             self.legal_moves = get_legal_moves(self.state)
             self._refresh_ui()
 
@@ -226,6 +346,37 @@ class ChessApp:
         if len(candidates) <= 1:
             return False
         return all(m.promotion is not None for m in candidates)
+
+    def _show_hint(self) -> None:
+        if self._ai_busy:
+            return
+        if get_game_status(self.state) != "ongoing":
+            return
+        if self.state.white_to_move != self.human_is_white:
+            return
+
+        state_snapshot = self.state
+        depth = self.ai_depth
+        gen = self._game_generation
+
+        self._ai_busy = True
+        self._set_controls_enabled(False)
+        self.status_var.set(f"Computing hint… ({self.difficulty_var.get()})")
+
+        def run_hint() -> None:
+            move = choose_best_move(state_snapshot, depth=depth)
+            self.root.after(0, lambda m=move, g=gen: self._finish_hint(m, g))
+
+        threading.Thread(target=run_hint, daemon=True).start()
+
+    def _finish_hint(self, move: Move | None, generation: int) -> None:
+        self._ai_busy = False
+        self._set_controls_enabled(True)
+        if generation != self._game_generation:
+            self._refresh_ui()
+            return
+        self.hint_move = move
+        self._refresh_ui()
 
     def _play_ai_turn(self) -> None:
         if self._is_game_finished():
@@ -328,9 +479,11 @@ class ChessApp:
         self._draw_board()
         self._draw_pieces()
         self._draw_coordinates()
+        self._draw_eval_bar()
         self._update_move_history()
         self._update_captured_panel()
         self._update_status_label()
+        self._refresh_hint_button_state()
 
     def _board_counts(self, state: GameState) -> tuple[Counter[str], Counter[str]]:
         white = Counter()
@@ -389,13 +542,14 @@ class ChessApp:
 
     def _draw_board(self) -> None:
         self.canvas.delete("all")
-        ox = self.margin_left
         light = "#F0D9B5"
         dark = "#B58863"
         selected_color = "#E8E36E"
         move_hint_color = "#8BC34A"
         last_move_light = "#F7EC74"
         last_move_dark = "#DAC34B"
+        hint_light = "#9EC8FF"
+        hint_dark = "#5B86C2"
 
         highlighted_targets = set()
         if self.selected_square is not None:
@@ -414,10 +568,16 @@ class ChessApp:
                 (last_move.end_row, last_move.end_col),
             }
 
+        hint_squares: set[tuple[int, int]] = set()
+        if self.hint_move is not None:
+            hint_squares = {
+                (self.hint_move.start_row, self.hint_move.start_col),
+                (self.hint_move.end_row, self.hint_move.end_col),
+            }
+
         for row in range(8):
             for col in range(8):
-                x1 = ox + col * self.square_size
-                y1 = row * self.square_size
+                x1, y1 = self._square_screen_xy(row, col)
                 x2 = x1 + self.square_size
                 y2 = y1 + self.square_size
                 is_light_square = (row + col) % 2 == 0
@@ -425,6 +585,9 @@ class ChessApp:
 
                 if (row, col) in last_move_squares:
                     color = last_move_light if is_light_square else last_move_dark
+
+                if (row, col) in hint_squares:
+                    color = hint_light if is_light_square else hint_dark
 
                 if self.selected_square == (row, col):
                     color = selected_color
@@ -434,14 +597,14 @@ class ChessApp:
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=color)
 
     def _draw_pieces(self) -> None:
-        ox = self.margin_left
         for row in range(8):
             for col in range(8):
                 piece = self.state.board[row][col]
                 if piece == ".":
                     continue
-                x = ox + col * self.square_size + self.square_size // 2
-                y = row * self.square_size + self.square_size // 2
+                x1, y1 = self._square_screen_xy(row, col)
+                x = x1 + self.square_size // 2
+                y = y1 + self.square_size // 2
                 self.canvas.create_text(
                     x,
                     y,
@@ -455,21 +618,23 @@ class ChessApp:
         label_fill = "#444444"
         font_small = ("Arial", 11, "bold")
 
-        for row in range(8):
-            rank = str(8 - row)
+        for display_row in range(8):
+            actual_row = display_row if self.human_is_white else 7 - display_row
+            rank = str(8 - actual_row)
             self.canvas.create_text(
                 ox // 2,
-                row * self.square_size + self.square_size // 2,
+                display_row * self.square_size + self.square_size // 2,
                 text=rank,
                 font=font_small,
                 fill=label_fill,
             )
 
         files_y = self.board_size + self.margin_bottom // 2
-        for col in range(8):
-            file_letter = chr(ord("a") + col)
+        for display_col in range(8):
+            actual_col = display_col if self.human_is_white else 7 - display_col
+            file_letter = chr(ord("a") + actual_col)
             self.canvas.create_text(
-                ox + col * self.square_size + self.square_size // 2,
+                ox + display_col * self.square_size + self.square_size // 2,
                 files_y,
                 text=file_letter,
                 font=font_small,
@@ -482,35 +647,71 @@ class ChessApp:
             self.status_var.set(f"AI thinking… ({difficulty})")
             return
 
+        terminal = self._terminal_label()
+        if terminal is not None:
+            self.status_var.set(terminal)
+            return
+
         side_to_move = "White" if self.state.white_to_move else "Black"
-        status = get_game_status(self.state)
         difficulty = self.difficulty_var.get()
-
-        if status == "ongoing":
-            if is_in_check(self.state, self.state.white_to_move):
-                self.status_var.set(f"{side_to_move} to move - Check! (AI: {difficulty})")
-            else:
-                self.status_var.set(f"{side_to_move} to move (AI: {difficulty})")
-            return
-
-        if status == "checkmate":
-            winner = "Black" if self.state.white_to_move else "White"
-            self.status_var.set(f"Checkmate - {winner} wins")
-            return
-
-        self.status_var.set("Stalemate - Draw")
+        if is_in_check(self.state, self.state.white_to_move):
+            self.status_var.set(f"{side_to_move} to move - Check! (AI: {difficulty})")
+        else:
+            self.status_var.set(f"{side_to_move} to move (AI: {difficulty})")
 
     def _is_game_finished(self) -> bool:
-        status = get_game_status(self.state)
-        if status == "ongoing":
+        terminal = self._terminal_label()
+        if terminal is None:
             return False
-
-        if status == "checkmate":
-            winner = "Black" if self.state.white_to_move else "White"
-            messagebox.showinfo("Game Over", f"Checkmate! {winner} wins.")
-        else:
-            messagebox.showinfo("Game Over", "Stalemate! It's a draw.")
+        if not self._end_announced:
+            self._end_announced = True
+            messagebox.showinfo("Game Over", terminal + ".")
         return True
+
+    def _draw_eval_bar(self) -> None:
+        self.eval_bar_canvas.delete("all")
+        width = self.eval_bar_width
+        height = self.board_size
+
+        terminal = self._terminal_label()
+        if terminal is not None and terminal.startswith("Checkmate"):
+            winner_is_white = "White wins" in terminal
+            white_frac = 1.0 if winner_is_white else 0.0
+            label = "1-0" if winner_is_white else "0-1"
+        elif terminal is not None:
+            white_frac = 0.5
+            label = "½-½"
+        else:
+            score = evaluate_position(self.state)
+            clamped = max(-1500, min(1500, score))
+            white_frac = 0.5 + clamped / 3000.0
+            pawns = score / 100.0
+            label = f"+{pawns:.1f}" if score >= 0 else f"{pawns:.1f}"
+
+        white_height = int(round(white_frac * height))
+        black_height = height - white_height
+
+        self.eval_bar_canvas.create_rectangle(0, 0, width, black_height, fill="#2A2A2A", outline="#2A2A2A")
+        self.eval_bar_canvas.create_rectangle(0, black_height, width, height, fill="#F0F0F0", outline="#F0F0F0")
+        midline = height // 2
+        self.eval_bar_canvas.create_line(0, midline, width, midline, fill="#808080")
+
+        if white_height >= 14:
+            self.eval_bar_canvas.create_text(
+                width // 2,
+                height - 8,
+                text=label,
+                font=("Arial", 9, "bold"),
+                fill="#222222",
+            )
+        else:
+            self.eval_bar_canvas.create_text(
+                width // 2,
+                8,
+                text=label,
+                font=("Arial", 9, "bold"),
+                fill="#EEEEEE",
+            )
 
 
 def run(ai_depth: int = 3) -> None:

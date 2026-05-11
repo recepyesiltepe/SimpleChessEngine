@@ -87,6 +87,10 @@ def _evaluate_position(state: GameState) -> int:
     return score
 
 
+def evaluate_position(state: GameState) -> int:
+    return _evaluate_position(state)
+
+
 def _order_moves(state: GameState, moves: list[Move]) -> list[Move]:
     def priority(move: Move) -> int:
         captured_piece = "."

@@ -160,6 +160,30 @@ def get_game_status(state: GameState) -> str:
     return "stalemate"
 
 
+def has_insufficient_material(state: GameState) -> bool:
+    minor_pieces: list[tuple[str, int]] = []
+    for row in range(8):
+        for col in range(8):
+            piece = state.board[row][col]
+            if piece == "." or piece.lower() == "k":
+                continue
+            piece_type = piece.lower()
+            if piece_type in ("p", "r", "q"):
+                return False
+            minor_pieces.append((piece, (row + col) % 2))
+
+    if len(minor_pieces) == 0:
+        return True
+    if len(minor_pieces) == 1:
+        return True
+    if len(minor_pieces) == 2 and all(p.lower() == "b" for p, _ in minor_pieces):
+        white_squares = [sq for p, sq in minor_pieces if p.isupper()]
+        black_squares = [sq for p, sq in minor_pieces if not p.isupper()]
+        if len(white_squares) == 1 and len(black_squares) == 1 and white_squares[0] == black_squares[0]:
+            return True
+    return False
+
+
 def is_in_check(state: GameState, is_white: bool) -> bool:
     king_symbol = "K" if is_white else "k"
     king_pos = _find_piece(state.board, king_symbol)
