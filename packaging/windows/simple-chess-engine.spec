@@ -2,6 +2,7 @@
 # PyInstaller spec for Windows (build with MSYS2 MinGW Python + GTK4 + PyGObject on PATH).
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -28,6 +29,29 @@ for pkg in ("gi", "cairo"):
         hiddenimports += h
     except Exception:
         pass
+
+
+def _bundle_msys_gobject_typelibs_and_gtk_share() -> None:
+    """MSYS2 typelibs (e.g. Gdk-4.0.typelib) live under sys.prefix; collect_all('gi') often misses them."""
+    global datas
+    prefix = Path(sys.prefix).resolve()
+    gi_repo = prefix / "lib" / "girepository-1.0"
+    if gi_repo.is_dir():
+        for item in sorted(gi_repo.iterdir()):
+            if item.is_file():
+                datas.append((str(item), "lib/girepository-1.0"))
+    for rel in ("share/glib-2.0/schemas", "share/gtk-4.0"):
+        root = prefix / rel
+        if not root.is_dir():
+            continue
+        for f in root.rglob("*"):
+            if f.is_file():
+                sub = f.relative_to(root)
+                dest_dir = str(Path(rel) / sub.parent)
+                datas.append((str(f), dest_dir))
+
+
+_bundle_msys_gobject_typelibs_and_gtk_share()
 
 try:
     hiddenimports += collect_submodules("engine")

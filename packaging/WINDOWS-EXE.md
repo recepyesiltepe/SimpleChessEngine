@@ -63,6 +63,14 @@ PyInstaller bootloaders are sometimes flagged as false positives. If that happen
 
 PyInstaller cannot reliably bundle **Windows GTK** from Linux in this setup. Build on Windows (or a Windows VM/CI runner) with MSYS2 as above.
 
+## Linux, Wine, and Proton
+
+On **Linux**, use the native app (`python main.py` or an AppImage), not the Windows `.exe`.
+
+**Wine / Proton** (Steam’s Proton, Bottles, etc.) is aimed at games and common Win32 APIs. **GTK 4 + GObject Introspection** is a full GUI stack (typelibs, many DLLs, GLib schemas, GDK backends). Even if the bundle includes typelibs, the stack often **does not run correctly** under Wine, and **Proton in particular is a poor fit** for GTK apps.
+
+If you see `Namespace Gdk not available` on real **Windows** after a rebuild, the bundle was missing typelibs; rebuild with the current spec (it copies `lib/girepository-1.0` and GTK share data from the MSYS2 prefix used at build time). If the error appears **only under Wine/Proton**, treat that as unsupported and use the Linux build instead.
+
 ## GitHub Actions
 
 This repository includes [`.github/workflows/windows-exe.yml`](../.github/workflows/windows-exe.yml). It runs on **`windows-latest`**, installs **MSYS2 UCRT64** packages (same stack as [WINDOWS.md](../WINDOWS.md)), runs `packaging/windows/build-mingw.sh`, and uploads **`SimpleChessEngine-windows-ucrt64`** containing the full `dist/SimpleChessEngine/` folder (exe + `_internal`).
