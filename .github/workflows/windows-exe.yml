@@ -1,0 +1,59 @@
+# Build the PyInstaller onedir bundle on windows-latest + MSYS2 UCRT64 (GTK4 + PyGObject).
+name: Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/windows-exe.yml"
+      - "packaging/windows/**"
+      - "engine/**"
+      - "gui.py"
+      - "main.py"
+      - "user_prefs.py"
+      - "theme_data.py"
+      - "pyproject.toml"
+      - "requirements.txt"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      # Avoid CRLF in checked-out shell scripts (msys2/setup-msys2 README).
+      - name: Git line endings
+        run: git config --global core.autocrlf input
+        shell: pwsh
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          release: false
+          install: >-
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-python-cairo
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Verify GTK stack
+        shell: msys2 {0}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; import cairo; print('ok')"
+
+      - name: Build PyInstaller bundle
+        shell: msys2 {0}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          bash packaging/windows/build-mingw.sh
+
+      - name: Upload onedir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleChessEngine-windows-ucrt64
+          path: dist/SimpleChessEngine/

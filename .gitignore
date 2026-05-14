@@ -1,14 +1,9 @@
-# Keep the repo limited to source + packaging metadata needed to install/run
-# (Python bytecode, local envs, build outputs, editor/OS cruft stay untracked).
-
-# --- Python bytecode & runtime ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
 .Python
 
-# --- Virtual environments ---
 .venv/
 .venv-test/
 venv/
@@ -16,7 +11,6 @@ env/
 ENV/
 .python-version
 
-# --- setuptools / pip / wheel ---
 build/
 dist/
 *.egg
@@ -24,9 +18,7 @@ dist/
 .eggs/
 pip-wheel-metadata/
 *.manifest
-*.spec
 
-# --- Test & coverage ---
 .pytest_cache/
 .tox/
 .nox/
@@ -38,14 +30,12 @@ htmlcov/
 junit.xml
 *.cover
 
-# --- Type checkers & linters ---
 .mypy_cache/
 .dmypy.json
 dmypy.json
 .ruff_cache/
 .pytype/
 
-# --- Editors & IDEs ---
 .idea/
 .vscode/
 *.swp
@@ -57,20 +47,17 @@ dmypy.json
 *.sublime-project
 *.sublime-workspace
 
-# --- OS ---
 .DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# --- Local / secrets (never ship) ---
 .env
 .env.*
 *.local
 .envrc
 .direnv/
 
-# --- Optional tooling / misc ---
 *.log
 .cache/
 .pytest/
@@ -78,5 +65,3 @@ prof/
 .benchmarks/
 .ipynb_checkpoints/
 *.code-workspace
-
-

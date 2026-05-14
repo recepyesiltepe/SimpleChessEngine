@@ -50,3 +50,7 @@ On Windows, preferences are stored under `%APPDATA%\\simple-chess-engine\\settin
 ## Sounds
 
 WAV files in `sounds/` are played with **`winsound`** when available; otherwise the code falls back to Gdk beeps (same as Linux without a player).
+
+## Standalone `.exe` (PyInstaller)
+
+To build a distributable folder with `SimpleChessEngine.exe`, see [packaging/WINDOWS-EXE.md](packaging/WINDOWS-EXE.md).
