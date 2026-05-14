@@ -1,34 +1,82 @@
-# Byte-compiled / cache files
+# Keep the repo limited to source + packaging metadata needed to install/run
+# (Python bytecode, local envs, build outputs, editor/OS cruft stay untracked).
+
+# --- Python bytecode & runtime ---
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+.Python
 
-# Virtual environments
+# --- Virtual environments ---
 .venv/
+.venv-test/
 venv/
 env/
 ENV/
+.python-version
 
-# Distribution / packaging
+# --- setuptools / pip / wheel ---
 build/
 dist/
+*.egg
 *.egg-info/
 .eggs/
+pip-wheel-metadata/
+*.manifest
+*.spec
 
-# Test / coverage
+# --- Test & coverage ---
 .pytest_cache/
+.tox/
+.nox/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
+.hypothesis/
+junit.xml
+*.cover
 
-# Type checker / tooling caches
+# --- Type checkers & linters ---
 .mypy_cache/
+.dmypy.json
+dmypy.json
 .ruff_cache/
+.pytype/
 
-# IDE/editor files
+# --- Editors & IDEs ---
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# OS files
+# --- OS ---
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Local / secrets (never ship) ---
+.env
+.env.*
+*.local
+.envrc
+.direnv/
+
+# --- Optional tooling / misc ---
+*.log
+.cache/
+.pytest/
+prof/
+.benchmarks/
+.ipynb_checkpoints/
+*.code-workspace
+
+

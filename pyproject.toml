@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simple-chess-engine"
+version = "0.1.0"
+description = "Simple chess engine with GTK 4 UI"
+requires-python = ">=3.10"
+dependencies = [
+    "PyGObject>=3.42",
+    "pycairo>=1.20",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["engine*"]
+
+[tool.setuptools]
+py-modules = ["gui", "main", "user_prefs", "theme_data"]

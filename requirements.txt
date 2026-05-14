@@ -1,0 +1,4 @@
+# GTK 4 + GObject introspection (Linux and Windows).
+# Windows: install GTK/PyGObject from MSYS2 (or another GTK build) first — see WINDOWS.md.
+PyGObject>=3.42
+pycairo>=1.20
