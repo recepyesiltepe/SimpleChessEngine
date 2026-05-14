@@ -36,3 +36,19 @@ if getattr(sys, "frozen", False):
     if data_parts:
         prev = os.environ.get("XDG_DATA_DIRS", "")
         os.environ["XDG_DATA_DIRS"] = os.pathsep.join(data_parts + ([prev] if prev else []))
+
+    for b in bases:
+        pixbuf_lib = os.path.join(b, "lib", "gdk-pixbuf-2.0")
+        if not os.path.isdir(pixbuf_lib):
+            continue
+        for name in sorted(os.listdir(pixbuf_lib)):
+            vdir = os.path.join(pixbuf_lib, name)
+            if not os.path.isdir(vdir):
+                continue
+            loaders = os.path.join(vdir, "loaders")
+            cache = os.path.join(vdir, "loaders.cache")
+            if os.path.isdir(loaders):
+                os.environ.setdefault("GDK_PIXBUF_MODULEDIR", loaders)
+            if os.path.isfile(cache):
+                os.environ.setdefault("GDK_PIXBUF_MODULE_FILE", cache)
+        break

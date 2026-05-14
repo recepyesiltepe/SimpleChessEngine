@@ -69,7 +69,9 @@ On **Linux**, use the native app (`python main.py` or an AppImage), not the Wind
 
 **Wine / Proton** (Steam’s Proton, Bottles, etc.) is aimed at games and common Win32 APIs. **GTK 4 + GObject Introspection** is a full GUI stack (typelibs, many DLLs, GLib schemas, GDK backends). Even if the bundle includes typelibs, the stack often **does not run correctly** under Wine, and **Proton in particular is a poor fit** for GTK apps.
 
-If you see `Namespace Gdk not available` on real **Windows** after a rebuild, the bundle was missing typelibs; rebuild with the current spec (it copies `lib/girepository-1.0` and GTK share data from the MSYS2 prefix used at build time). If the error appears **only under Wine/Proton**, treat that as unsupported and use the Linux build instead.
+If you see `Namespace Gdk not available` on real **Windows** after a rebuild, the bundle was missing typelibs; rebuild with the current spec (it copies `lib/girepository-1.0` and GTK share data from the MSYS2 prefix used at build time). GdkPixbuf-related failures (for example `AssertionError` in `gi/overrides/GdkPixbuf.py` with `g_type != TYPE_NONE`) often mean loader DLLs or `loaders.cache` were not found; the spec also bundles `lib/gdk-pixbuf-2.0` and the runtime hook sets `GDK_PIXBUF_MODULEDIR` / `GDK_PIXBUF_MODULE_FILE` when present.
+
+If the error appears **only under Wine/Proton**, treat that as unsupported and use the Linux build instead — Wine may still fail to load GDK/GdkPixbuf even with a complete bundle.
 
 ## GitHub Actions
 

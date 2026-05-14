@@ -49,6 +49,13 @@ def _bundle_msys_gobject_typelibs_and_gtk_share() -> None:
                 sub = f.relative_to(root)
                 dest_dir = str(Path(rel) / sub.parent)
                 datas.append((str(f), dest_dir))
+    pix_root = prefix / "lib" / "gdk-pixbuf-2.0"
+    if pix_root.is_dir():
+        for f in pix_root.rglob("*"):
+            if f.is_file():
+                sub = f.relative_to(pix_root)
+                dest_dir = str(Path("lib/gdk-pixbuf-2.0") / sub.parent)
+                datas.append((str(f), dest_dir))
 
 
 _bundle_msys_gobject_typelibs_and_gtk_share()
@@ -70,6 +77,7 @@ except Exception:
 hiddenimports += [
     "gi.repository.Gtk",
     "gi.repository.Gdk",
+    "gi.repository.GdkPixbuf",
     "gi.repository.Gio",
     "gi.repository.GLib",
     "gi.repository.Pango",
