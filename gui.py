@@ -94,16 +94,49 @@ _CAPTURE_DISPLAY_ORDER = (
     ("P", "p"),
 )
 
-# Layout: board scales between these square sizes; window fits the primary monitor.
-_MIN_SQUARE_SIZE = 36
-_MAX_SQUARE_SIZE = 96
-_DEFAULT_SQUARE_SIZE = 80
+# Layout: board scales to the drawing area (no fixed pixel cap on large / fullscreen windows).
+_MIN_SQUARE_SIZE = 32
+_DEFAULT_SQUARE_SIZE = 72
 _IDEAL_WINDOW_WIDTH = 1100
 _IDEAL_WINDOW_HEIGHT = 760
 _MIN_WINDOW_WIDTH = 640
 _MIN_WINDOW_HEIGHT = 480
-_PORTRAIT_MAX_WIDTH = 980
-_PORTRAIT_MAX_HEIGHT = 720
+_PORTRAIT_MAX_WIDTH = 820
+_PORTRAIT_MAX_HEIGHT = 560
+# Estimated fixed chrome (toolbar + status) for balanced default window sizing.
+_HEADER_CHROME_HEIGHT = 208
+_STATUS_CHROME_HEIGHT = 68
+
+_THEME_CSS = """
+.chess-panel {
+  background-color: @window_bg_color;
+}
+.chess-board-drawing {
+  background-color: @window_bg_color;
+}
+.chess-panel textview {
+  background-color: @window_bg_color;
+  color: @window_fg_color;
+}
+"""
+_theme_css_installed = False
+
+
+def _install_theme_css(window: Gtk.Window) -> None:
+    global _theme_css_installed
+    if _theme_css_installed:
+        return
+    display = window.get_display()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_string(_THEME_CSS)
+    Gtk.StyleContext.add_provider_for_display(
+        display,
+        provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+    _theme_css_installed = True
 
 
 def _set_clipboard_text(widget: Gtk.Widget, text: str) -> None:
@@ -121,7 +154,9 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.square_size = _DEFAULT_SQUARE_SIZE
         self.margin_left = 28
         self.margin_bottom = 28
+        self._sync_board_dimensions()
         self._layout_portrait = False
+        self._relayout_idle_id: int | None = None
         self.human_is_white = True
 
         self.state = GameState.initial()
@@ -158,10 +193,16 @@ class ChessWindow(Gtk.ApplicationWindow):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(outer)
 
+        self._header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._header_scroll = Gtk.ScrolledWindow()
+        self._header_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._header_scroll.set_max_content_height(168)
+        self._header_scroll.set_propagate_natural_height(True)
+        self._header_scroll.set_child(self._header_box)
+
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        controls.set_margin_top(8)
-        controls.set_margin_start(8)
-        controls.set_margin_end(8)
+        controls.set_margin_start(4)
+        controls.set_margin_end(4)
         controls.append(Gtk.Label(label="Difficulty:"))
         difficulty_names = list(DIFFICULTY_TO_DEPTH.keys())
         self.difficulty_dropdown = Gtk.DropDown.new_from_strings(difficulty_names)
@@ -192,11 +233,11 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.restart_button.connect("clicked", lambda _b: self._restart_game())
         controls.append(self.restart_button)
 
-        outer.append(controls)
+        self._header_box.append(controls)
 
         tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        tools.set_margin_start(8)
-        tools.set_margin_end(8)
+        tools.set_margin_start(4)
+        tools.set_margin_end(4)
         self.copy_fen_button = Gtk.Button(label="Copy FEN")
         self.copy_fen_button.connect("clicked", lambda _b: self._copy_fen_to_clipboard())
         tools.append(self.copy_fen_button)
@@ -215,11 +256,11 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.load_pgn_button = Gtk.Button(label="Paste PGN…")
         self.load_pgn_button.connect("clicked", lambda _b: self._open_paste_pgn_dialog())
         tools.append(self.load_pgn_button)
-        outer.append(tools)
+        self._header_box.append(tools)
 
         prefs_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        prefs_row.set_margin_start(8)
-        prefs_row.set_margin_end(8)
+        prefs_row.set_margin_start(4)
+        prefs_row.set_margin_end(4)
         prefs_row.append(Gtk.Label(label="Board theme:"))
         theme_names = list(THEMES.keys())
         self.theme_dropdown = Gtk.DropDown.new_from_strings(theme_names)
@@ -232,13 +273,12 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.sounds_switch.connect("notify::active", self._on_sounds_active_notify)
         prefs_row.append(self.sounds_switch)
         prefs_row.append(Gtk.Label(label="←/→ replay · Enter jump · Esc clear"))
-        outer.append(prefs_row)
+        self._header_box.append(prefs_row)
 
         clock_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        clock_row.set_margin_start(8)
-        clock_row.set_margin_end(8)
-        clock_row.set_margin_top(2)
-        clock_row.set_margin_bottom(4)
+        clock_row.set_margin_start(4)
+        clock_row.set_margin_end(4)
+        clock_row.set_margin_bottom(2)
         clock_row.append(Gtk.Label(label="Time control:"))
         clock_strings = [opt[0] for opt in CLOCK_OPTIONS]
         self.clock_dropdown = Gtk.DropDown.new_from_strings(clock_strings)
@@ -254,22 +294,30 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.black_clock_label.add_css_class("monospace")
         clock_row.append(self.black_clock_label)
         clock_row.append(Gtk.Label(label="+inc/move"))
-        outer.append(clock_row)
+        self._header_box.append(clock_row)
+        outer.append(self._header_scroll)
 
         self._content_stack = Gtk.Stack()
+        self._content_stack.add_css_class("chess-panel")
         self._content_stack.set_vexpand(True)
         self._content_stack.set_hexpand(True)
 
-        self._landscape_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._landscape_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._landscape_box.add_css_class("chess-panel")
         self._landscape_box.set_vexpand(True)
+        self._landscape_box.set_hexpand(True)
         self._portrait_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._portrait_box.add_css_class("chess-panel")
         self._portrait_box.set_vexpand(True)
+        self._portrait_box.set_hexpand(True)
 
-        self._board_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._board_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._board_row.add_css_class("chess-panel")
         self._board_row.set_vexpand(True)
         self._board_row.set_hexpand(True)
 
         captured_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        captured_box.add_css_class("chess-panel")
         captured_box.set_hexpand(False)
         self._captured_box = captured_box
         captured_box.append(Gtk.Label(label="Material", halign=Gtk.Align.START))
@@ -287,6 +335,7 @@ class ChessWindow(Gtk.ApplicationWindow):
         self._board_row.append(captured_box)
 
         self.eval_drawing = Gtk.DrawingArea()
+        self.eval_drawing.set_size_request(self.eval_bar_width, -1)
         self.eval_drawing.set_hexpand(False)
         self.eval_drawing.set_vexpand(True)
         self.eval_drawing.set_valign(Gtk.Align.FILL)
@@ -294,10 +343,11 @@ class ChessWindow(Gtk.ApplicationWindow):
         self._board_row.append(self.eval_drawing)
 
         self.board_drawing = Gtk.DrawingArea()
+        self.board_drawing.add_css_class("chess-board-drawing")
         self.board_drawing.set_hexpand(True)
         self.board_drawing.set_vexpand(True)
-        self.board_drawing.set_valign(Gtk.Align.FILL)
         self.board_drawing.set_halign(Gtk.Align.FILL)
+        self.board_drawing.set_valign(Gtk.Align.FILL)
         self.board_drawing.set_draw_func(self._draw_board_canvas, None)
         click_gesture = Gtk.GestureClick()
         click_gesture.connect("pressed", self._on_board_pressed)
@@ -307,12 +357,13 @@ class ChessWindow(Gtk.ApplicationWindow):
         drag_gesture.connect("drag-begin", self._on_board_drag_begin)
         drag_gesture.connect("drag-end", self._on_board_drag_end)
         self.board_drawing.add_controller(drag_gesture)
+
+        self._min_board_side = _MIN_SQUARE_SIZE * 8 + self.margin_left
+        self.board_drawing.set_size_request(self._min_board_side, -1)
         self._board_row.append(self.board_drawing)
 
-        self._landscape_spacer = Gtk.Box()
-        self._landscape_spacer.set_hexpand(True)
-
         history_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        history_box.add_css_class("chess-panel")
         history_box.set_hexpand(False)
         self._history_box = history_box
         history_box.append(Gtk.Label(label="Move History", halign=Gtk.Align.START))
@@ -328,22 +379,21 @@ class ChessWindow(Gtk.ApplicationWindow):
         history_box.append(self._history_scroll)
 
         self._landscape_box.append(self._board_row)
-        self._landscape_box.append(self._landscape_spacer)
         self._landscape_box.append(self._history_box)
 
         self._content_stack.add_named(self._landscape_box, "landscape")
         self._content_stack.add_named(self._portrait_box, "portrait")
         self._content_stack.set_visible_child_name("landscape")
 
-        content_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content_wrap.set_margin_start(8)
-        content_wrap.set_margin_end(8)
-        content_wrap.set_margin_bottom(8)
-        content_wrap.set_vexpand(True)
-        content_wrap.append(self._content_stack)
-        outer.append(content_wrap)
-
-        self._sync_board_dimensions()
+        self._content_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._content_wrap.add_css_class("chess-panel")
+        self._content_wrap.set_margin_start(6)
+        self._content_wrap.set_margin_end(6)
+        self._content_wrap.set_margin_bottom(4)
+        self._content_wrap.set_vexpand(True)
+        self._content_wrap.set_hexpand(True)
+        self._content_wrap.append(self._content_stack)
+        outer.append(self._content_wrap)
 
         self.status_label = Gtk.Label(label="")
         self.status_label.set_margin_top(8)
@@ -364,7 +414,8 @@ class ChessWindow(Gtk.ApplicationWindow):
         self.add_controller(key_ctrl)
 
         self.connect("close-request", self._on_close_request)
-        self.board_drawing.connect("notify::allocation", self._on_board_allocation_changed)
+        self.board_drawing.connect("notify::allocation", self._on_board_drawing_allocation_changed)
+        self._content_wrap.connect("notify::allocation", self._on_content_allocation_changed)
         self.connect("notify::default-width", self._on_window_metrics_changed)
         self.connect("notify::default-height", self._on_window_metrics_changed)
         self.connect("realize", self._on_window_realize)
@@ -378,39 +429,44 @@ class ChessWindow(Gtk.ApplicationWindow):
             self._after_ms(100, self._play_ai_turn)
 
     def _sync_board_dimensions(self) -> None:
+        """Update logical board size for drawing (widget size comes from layout expand)."""
         self.board_size = self.square_size * 8
         self.canvas_width = self.margin_left + self.board_size
         self.canvas_height = self.board_size + self.margin_bottom
-        if not hasattr(self, "board_drawing"):
-            return
-        self.board_drawing.set_content_width(self.canvas_width)
-        self.board_drawing.set_content_height(self.canvas_height)
-        self.eval_drawing.set_content_width(self.eval_bar_width)
-        self.eval_drawing.set_content_height(self.board_size)
 
     def _available_monitor_size(self) -> tuple[int, int]:
         display = Gdk.Display.get_default()
         if display is None:
             return 1920, 1080
-        monitor = display.get_primary_monitor()
-        if monitor is None:
+        try:
             monitors = display.get_monitors()
             if monitors is not None and monitors.get_n_items() > 0:
                 monitor = monitors.get_item(0)
-        if monitor is None:
-            return 1920, 1080
-        geom = monitor.get_geometry()
-        scale = monitor.get_scale_factor()
-        return max(geom.width, 1) * scale, max(geom.height, 1) * scale
+                geom = monitor.get_geometry()
+                scale = monitor.get_scale_factor()
+                return max(geom.width, 1) * scale, max(geom.height, 1) * scale
+        except Exception:
+            pass
+        return 1920, 1080
+
+    def _chrome_widths_for_window(self, window_w: int) -> tuple[int, int]:
+        if window_w < 720:
+            return 72, 110
+        if window_w < 1024:
+            return 100, 150
+        return 120, 180
 
     def _apply_initial_window_geometry(self) -> None:
         sw, sh = self._available_monitor_size()
         usable_w = int(sw * 0.92)
         usable_h = int(sh * 0.88)
-        w = min(_IDEAL_WINDOW_WIDTH, usable_w)
         h = min(_IDEAL_WINDOW_HEIGHT, usable_h)
-        w = max(w, min(_MIN_WINDOW_WIDTH, usable_w))
         h = max(h, min(_MIN_WINDOW_HEIGHT, usable_h))
+        cap_w, hist_w = self._chrome_widths_for_window(usable_w)
+        chrome_w = cap_w + self.eval_bar_width + hist_w + 40
+        board_side = max(self._min_board_side, h - _HEADER_CHROME_HEIGHT - _STATUS_CHROME_HEIGHT)
+        w = min(usable_w, _IDEAL_WINDOW_WIDTH, chrome_w + board_side)
+        w = max(w, min(_MIN_WINDOW_WIDTH, usable_w))
         self.set_default_size(w, h)
 
     def _dialog_min_width(self) -> int:
@@ -420,24 +476,66 @@ class ChessWindow(Gtk.ApplicationWindow):
         return 480
 
     def _on_window_realize(self, _window: Gtk.Window) -> None:
+        _install_theme_css(self)
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            settings.connect("notify::gtk-theme-name", self._on_gtk_theme_changed)
+            settings.connect("notify::gtk-application-prefer-dark-theme", self._on_gtk_theme_changed)
         self._update_responsive_layout()
+        self._schedule_board_relayout()
+        GLib.timeout_add(150, self._relayout_board_area_timeout)
+
+    def _on_gtk_theme_changed(self, *_args: object) -> None:
+        self.board_drawing.queue_draw()
+        self.eval_drawing.queue_draw()
+
+    def _relayout_board_area_timeout(self) -> bool:
+        self._relayout_board_area()
+        return False
 
     def _on_window_metrics_changed(self, _window: Gtk.Window, _pspec: object) -> None:
         self._update_responsive_layout()
 
-    def _on_board_allocation_changed(self, widget: Gtk.Widget, _pspec: object) -> None:
-        alloc = widget.get_allocation()
-        if alloc.width < 8 or alloc.height < 8:
+    def _square_size_for_side(self, side: int) -> int:
+        sq_w = int((side - self.margin_left) / 8)
+        sq_h = int((side - self.margin_bottom) / 8)
+        return max(_MIN_SQUARE_SIZE, min(sq_w, sq_h))
+
+    def _apply_board_side(self, side: int, *, redraw_eval: bool = False) -> None:
+        if side < 8:
             return
-        sq_w = int((alloc.width - self.margin_left) / 8)
-        sq_h = int((alloc.height - self.margin_bottom) / 8)
-        sq = min(sq_w, sq_h, _MAX_SQUARE_SIZE)
-        sq = max(sq, _MIN_SQUARE_SIZE)
-        if sq != self.square_size:
-            self.square_size = sq
-            self._sync_board_dimensions()
-            self.board_drawing.queue_draw()
+        sq = self._square_size_for_side(side)
+        if sq == self.square_size:
+            return
+        self.square_size = sq
+        self._sync_board_dimensions()
+        if redraw_eval:
             self.eval_drawing.queue_draw()
+
+    def _on_board_drawing_allocation_changed(self, _widget: Gtk.Widget, _pspec: object) -> None:
+        alloc = self.board_drawing.get_allocation()
+        self._apply_board_side(min(alloc.width, alloc.height), redraw_eval=True)
+
+    def _schedule_board_relayout(self) -> None:
+        if self._relayout_idle_id is not None:
+            return
+        self._relayout_idle_id = GLib.idle_add(self._relayout_board_area_idle)
+
+    def _relayout_board_area_idle(self) -> bool:
+        self._relayout_idle_id = None
+        self._relayout_board_area()
+        return False
+
+    def _relayout_board_area(self) -> None:
+        alloc = self.board_drawing.get_allocation()
+        if alloc.width < 2 or alloc.height < 2:
+            return
+        self._apply_board_side(min(alloc.width, alloc.height), redraw_eval=True)
+        self.board_drawing.queue_draw()
+
+    def _on_content_allocation_changed(self, _widget: Gtk.Widget, _pspec: object) -> None:
+        self._update_responsive_layout()
+        self._schedule_board_relayout()
 
     def _update_responsive_layout(self) -> None:
         w = self.get_width()
@@ -445,7 +543,7 @@ class ChessWindow(Gtk.ApplicationWindow):
         if w < 2 or h < 2:
             return
 
-        want_portrait = w < _PORTRAIT_MAX_WIDTH or h < _PORTRAIT_MAX_HEIGHT
+        want_portrait = w < _PORTRAIT_MAX_WIDTH and h < _PORTRAIT_MAX_HEIGHT
         if want_portrait != self._layout_portrait:
             self._layout_portrait = want_portrait
             if want_portrait:
@@ -473,17 +571,16 @@ class ChessWindow(Gtk.ApplicationWindow):
                 self._history_box.set_hexpand(False)
                 self._content_stack.set_visible_child_name("landscape")
 
-        if w < 820:
-            cap_w, hist_w = 88, 130
-        elif w < 1024:
-            cap_w, hist_w = 110, 165
-        else:
-            cap_w, hist_w = 140, 200
+        cap_w, hist_w = self._chrome_widths_for_window(w)
         self._captured_box.set_size_request(cap_w, -1)
         if self._layout_portrait:
-            self._history_box.set_size_request(-1, -1)
+            self._history_box.set_size_request(-1, 120)
+            self._history_scroll.set_max_content_height(160)
         else:
             self._history_box.set_size_request(hist_w, -1)
+            self._history_scroll.set_max_content_height(-1)
+
+        self._schedule_board_relayout()
 
     def _apply_saved_preferences(self) -> None:
         p = self._prefs
@@ -1678,17 +1775,18 @@ class ChessWindow(Gtk.ApplicationWindow):
     def _draw_board_canvas(self, _area: Gtk.DrawingArea, cr: object, width: int, height: int, _data: object) -> None:
         if width < 2 or height < 2:
             return
+        self._apply_board_side(min(width, height))
+        if not hasattr(self, "canvas_width") or self.canvas_width < 1 or self.canvas_height < 1:
+            self._sync_board_dimensions()
 
         scale = min(width / self.canvas_width, height / self.canvas_height)
+        if scale <= 0:
+            return
         ox = (width - self.canvas_width * scale) / 2.0
         oy = (height - self.canvas_height * scale) / 2.0
         self._board_render_scale = scale
         self._board_render_ox = ox
         self._board_render_oy = oy
-
-        cr.set_source_rgb(0.18, 0.18, 0.19)
-        cr.rectangle(0, 0, width, height)
-        cr.fill()
 
         cr.save()
         cr.translate(ox, oy)
@@ -1852,14 +1950,23 @@ class ChessWindow(Gtk.ApplicationWindow):
 
 class ChessApplication(Gtk.Application):
     def __init__(self, ai_depth: int = 3) -> None:
-        super().__init__(application_id="dev.simplechess.gtk", flags=Gio.ApplicationFlags.FLAGS_NONE)
+        super().__init__(
+            application_id="dev.simplechess.gtk",
+            flags=Gio.ApplicationFlags.FLAGS_NONE | Gio.ApplicationFlags.NON_UNIQUE,
+        )
         self._ai_depth = ai_depth
 
     def do_activate(self) -> None:
-        win = ChessWindow(application=self, ai_depth=self._ai_depth)
-        win.present()
+        try:
+            win = ChessWindow(application=self, ai_depth=self._ai_depth)
+            win.present()
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+            raise
 
 
-def run(ai_depth: int = 3) -> None:
+def run(ai_depth: int = 3) -> int:
     app = ChessApplication(ai_depth=ai_depth)
-    app.run(None)
+    return int(app.run(None) or 0)

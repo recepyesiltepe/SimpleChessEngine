@@ -1,13 +1,99 @@
 #!/usr/bin/env bash
+# Launcher for the AppImage / AppDir bundle (conda-forge GTK4 + PyGObject).
 set -euo pipefail
-HERE="$(dirname "$(readlink -f "${0}")")"
+
+HERE="$(dirname "$(readlink -f "${0}" 2>/dev/null || realpath "${0}" 2>/dev/null || echo "${0}")")"
 PREFIX="${HERE}/usr"
-export PATH="${PREFIX}/bin:${PATH}"
-export LD_LIBRARY_PATH="${PREFIX}/lib:${PREFIX}/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
-export GI_TYPELIB_PATH="${PREFIX}/lib/girepository-1.0:${GI_TYPELIB_PATH:-}"
-export XDG_DATA_DIRS="${PREFIX}/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-export GDK_PIXBUF_MODULE_FILE="${GDK_PIXBUF_MODULE_FILE:-}"
+PYTHON="${PREFIX}/bin/python"
+LOG="${XDG_CACHE_HOME:-${HOME}/.cache}/simple-chess-engine/launch.log"
+
+_log() {
+  mkdir -p "$(dirname "${LOG}")"
+  printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"${LOG}"
+}
+
+_show_error() {
+  local msg="$1"
+  _log "ERROR: ${msg}"
+  if command -v zenity >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    zenity --error --width=480 --text="${msg}" 2>/dev/null || true
+  elif command -v kdialog >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    kdialog --error "${msg}" 2>/dev/null || true
+  fi
+  echo "Simple Chess Engine: ${msg}" >&2
+  echo "Log: ${LOG}" >&2
+}
+
+_log "=== AppRun start HERE=${HERE} ==="
+
+if [[ ! -x "${PYTHON}" ]]; then
+  _show_error "Bundled Python not found (${PYTHON}). Rebuild the AppImage."
+  exit 127
+fi
+
+# Do not mix host GTK/GLib with the bundle (common cause of instant silent exit).
+unset LD_PRELOAD PYTHONHOME PYTHONPATH
+export PATH="${PREFIX}/bin:/usr/bin:/bin"
+export LD_LIBRARY_PATH="${PREFIX}/lib"
+[[ -d "${PREFIX}/lib64" ]] && export LD_LIBRARY_PATH="${PREFIX}/lib64:${LD_LIBRARY_PATH}"
+[[ -d "${PREFIX}/lib/x86_64-linux-gnu" ]] && \
+  export LD_LIBRARY_PATH="${PREFIX}/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+
+export GI_TYPELIB_PATH="${PREFIX}/lib/girepository-1.0"
+export XDG_DATA_DIRS="${PREFIX}/share"
+export GSETTINGS_SCHEMA_DIR="${PREFIX}/share/glib-2.0/schemas"
 export GTK_EXE_PREFIX="${PREFIX}"
 export GTK_DATA_PREFIX="${PREFIX}"
-unset PYTHONHOME
-exec "${PREFIX}/bin/simple-chess-engine" "$@"
+export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+export PYTHONNOUSERSITE=1
+export PYTHONUNBUFFERED=1
+
+if [[ -f "${PREFIX}/ssl/cacert.pem" ]]; then
+  export SSL_CERT_FILE="${PREFIX}/ssl/cacert.pem"
+  export REQUESTS_CA_BUNDLE="${SSL_CERT_FILE}"
+fi
+
+pixbuf_cache=""
+for cache in "${PREFIX}"/lib/gdk-pixbuf-2.0/*/loaders.cache; do
+  if [[ -f "${cache}" ]]; then
+    pixbuf_cache="${cache}"
+    export GDK_PIXBUF_MODULEDIR="${cache%/loaders.cache}/loaders"
+    break
+  fi
+done
+if [[ -n "${pixbuf_cache}" ]]; then
+  export GDK_PIXBUF_MODULE_FILE="${pixbuf_cache}"
+  _log "GDK_PIXBUF_MODULE_FILE=${pixbuf_cache}"
+else
+  _log "WARN: gdk-pixbuf loaders.cache missing"
+fi
+
+if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  _show_error "No graphical session (DISPLAY / WAYLAND_DISPLAY). Run from a desktop, or in a terminal on this machine."
+  exit 1
+fi
+
+_log "Preflight: Gtk import"
+if ! "${PYTHON}" -c "
+import gi
+gi.require_version('Gtk', '4.0')
+from gi.repository import Gtk
+if not Gtk.init_check():
+    raise SystemExit('Gtk.init_check() failed')
+print('Gtk', Gtk.get_major_version())
+" >>"${LOG}" 2>&1; then
+  _show_error "GTK failed to load from the bundle. Open ${LOG} for details."
+  exit 1
+fi
+
+_log "Starting application"
+set +e
+"${PYTHON}" -I -c "from main import main; import sys; sys.exit(main() or 0)" "$@" >>"${LOG}" 2>&1
+ec=$?
+set -e
+if [[ "${ec}" -ne 0 ]]; then
+  _show_error "Application exited with code ${ec}. See ${LOG}"
+  exit "${ec}"
+fi
+_log "Application exited OK"
+exit 0

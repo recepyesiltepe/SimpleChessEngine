@@ -1,9 +1,23 @@
+# --- Build outputs ---
+build/
+dist/
+*.AppImage
+*.appimage
+
+# --- Python bytecode & installs ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
 .Python
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.manifest
+simple_chess_engine.egg-info/
 
+# --- Virtual environments ---
 .venv/
 .venv-test/
 venv/
@@ -11,14 +25,16 @@ env/
 ENV/
 .python-version
 
-build/
-dist/
-*.egg
-*.egg-info/
-.eggs/
-pip-wheel-metadata/
-*.manifest
+# --- Generated icons (source of truth: chess.ico; run packaging/icons/generate_icons.py) ---
+packaging/icons/hicolor/
+packaging/icons/simple-chess-engine.png
+packaging/icons/source-king.png
+packaging/windows/app.ico
 
+# --- Documentation (not needed to build) ---
+*.md
+
+# --- Test, coverage, type checkers ---
 .pytest_cache/
 .tox/
 .nox/
@@ -29,13 +45,13 @@ htmlcov/
 .hypothesis/
 junit.xml
 *.cover
-
 .mypy_cache/
 .dmypy.json
 dmypy.json
 .ruff_cache/
 .pytype/
 
+# --- Editors & OS ---
 .idea/
 .vscode/
 *.swp
@@ -46,18 +62,19 @@ dmypy.json
 .settings/
 *.sublime-project
 *.sublime-workspace
-
 .DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# --- Secrets & local env ---
 .env
 .env.*
 *.local
 .envrc
 .direnv/
 
+# --- Logs & misc ---
 *.log
 .cache/
 .pytest/

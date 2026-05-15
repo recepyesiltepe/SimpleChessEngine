@@ -103,7 +103,7 @@ sounds_dir = ROOT / "sounds"
 if sounds_dir.is_dir():
     datas += [(str(sounds_dir), "sounds")]
 
-_app_icon = _spec_dir / "app.ico"
+_app_icon = ROOT / "chess.ico"
 _exe_icon = str(_app_icon) if _app_icon.is_file() else None
 
 a = Analysis(
