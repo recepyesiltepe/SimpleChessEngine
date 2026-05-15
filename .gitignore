@@ -33,6 +33,7 @@ packaging/windows/app.ico
 
 # --- Documentation (not needed to build) ---
 *.md
+!README.md
 
 # --- Test, coverage, type checkers ---
 .pytest_cache/
