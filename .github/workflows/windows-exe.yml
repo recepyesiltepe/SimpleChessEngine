@@ -36,6 +36,8 @@ jobs:
             mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-python-pip
             mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-gdk-pixbuf2
             mingw-w64-ucrt-x86_64-python-gobject
             mingw-w64-ucrt-x86_64-python-cairo
             mingw-w64-ucrt-x86_64-gcc
@@ -44,13 +46,58 @@ jobs:
         shell: msys2 {0}
         run: |
           cd "$GITHUB_WORKSPACE"
-          python -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; import cairo; print('ok')"
+          python -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk, Gdk; import cairo; print('ok')"
 
       - name: Build PyInstaller bundle
         shell: msys2 {0}
         run: |
           cd "$GITHUB_WORKSPACE"
           bash packaging/windows/build-mingw.sh
+
+      - name: Verify bundle contains GTK runtime
+        shell: msys2 {0}
+        run: |
+          cd "$GITHUB_WORKSPACE/dist/SimpleChessEngine"
+          python - <<'PY'
+          import os
+          import sys
+
+          bundle = os.getcwd()
+          internal = os.path.join(bundle, "_internal")
+          roots = [internal, bundle] if os.path.isdir(internal) else [bundle]
+
+          def find_file(name: str) -> str | None:
+              name_l = name.lower()
+              for root in roots:
+                  for dirpath, _, files in os.walk(root):
+                      for f in files:
+                          if f.lower() == name_l:
+                              return os.path.join(dirpath, f)
+              return None
+
+          def find_dll_prefix(prefix: str) -> str | None:
+              p = prefix.lower()
+              for root in roots:
+                  for dirpath, _, files in os.walk(root):
+                      for f in files:
+                          fl = f.lower()
+                          if fl.startswith(p) and fl.endswith(".dll"):
+                              return os.path.join(dirpath, f)
+              return None
+
+          missing = []
+          gtk = find_dll_prefix("libgtk-4")
+          if gtk is None:
+              missing.append("libgtk-4*.dll")
+          for exact in ("libglib-2.0-0.dll", "libgobject-2.0-0.dll", "Gdk-4.0.typelib"):
+              if find_file(exact) is None:
+                  missing.append(exact)
+          if missing:
+              print("Missing:", missing)
+              sys.exit(1)
+          gdk = find_dll_prefix("libgdk-4")
+          print("GTK runtime files OK:", gtk, "(gdk dll:" + (gdk or "merged into libgtk") + ")")
+          PY
 
       - name: Upload onedir artifact
         uses: actions/upload-artifact@v4

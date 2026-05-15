@@ -69,7 +69,11 @@ On **Linux**, use the native app (`python main.py` or an AppImage), not the Wind
 
 **Wine / Proton** (Steam’s Proton, Bottles, etc.) is aimed at games and common Win32 APIs. **GTK 4 + GObject Introspection** is a full GUI stack (typelibs, many DLLs, GLib schemas, GDK backends). Even if the bundle includes typelibs, the stack often **does not run correctly** under Wine, and **Proton in particular is a poor fit** for GTK apps.
 
-If you see `Namespace Gdk not available` on real **Windows** after a rebuild, the bundle was missing typelibs; rebuild with the current spec (it copies `lib/girepository-1.0` and GTK share data from the MSYS2 prefix used at build time). GdkPixbuf-related failures (for example `AssertionError` in `gi/overrides/GdkPixbuf.py` with `g_type != TYPE_NONE`) often mean loader DLLs or `loaders.cache` were not found; the spec also bundles `lib/gdk-pixbuf-2.0` and the runtime hook sets `GDK_PIXBUF_MODULEDIR` / `GDK_PIXBUF_MODULE_FILE` when present.
+If you see `Namespace Gdk not available` on real **Windows**, rebuild with the current spec and **`copy-msys2-runtime.sh`** (run automatically from `build-mingw.sh`): it copies **all `bin/*.dll`** from the MSYS2 build prefix into `_internal`, plus typelibs, schemas, gtk-4.0 share data, and gdk-pixbuf loaders. PyInstaller alone often omits those DLLs even when listed in the spec.
+
+`AssertionError` in `gi/overrides/Gdk.py` or `GdkPixbuf.py` (`g_type != TYPE_NONE`) means **native GTK DLLs did not load** (incomplete bundle or wrong folder layout). Ship the whole `SimpleChessEngine` folder; do not move only the `.exe` away from `_internal`. After pulling spec fixes, run **Actions → Windows EXE** again and download a fresh artifact.
+
+Newer MSYS2 builds may ship **`libgtk-4-1.dll`** (not `libgtk-4-0.dll`) and often **no separate `libgdk-4-*.dll`** (Gdk is inside `libgtk`). `copy-msys2-runtime.sh` copies via `pacman -Ql` and only requires `libgtk-4*.dll` in `_internal`.
 
 If the error appears **only under Wine/Proton**, treat that as unsupported and use the Linux build instead — Wine may still fail to load GDK/GdkPixbuf even with a complete bundle.
 

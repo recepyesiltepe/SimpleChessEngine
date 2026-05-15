@@ -15,8 +15,11 @@ if getattr(sys, "frozen", False):
         for sub in ("", "bin"):
             p = os.path.join(b, sub) if sub else b
             if os.path.isdir(p):
-                path_dirs.append(p)
-    os.environ["PATH"] = os.pathsep.join(path_dirs + [os.environ.get("PATH", "")])
+                path_dirs.append(os.path.abspath(p))
+                if hasattr(os, "add_dll_directory"):
+                    os.add_dll_directory(p)
+    if path_dirs:
+        os.environ["PATH"] = os.pathsep.join(path_dirs + [os.environ.get("PATH", "")])
 
     gi_parts: list[str] = []
     for b in bases:
